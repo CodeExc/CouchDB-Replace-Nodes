@@ -6,7 +6,7 @@ Der neue Node übernimmt zusätzliche Replikate aller Shards des alten Nodes. Na
 
 ## Voraussetzungen
 
-- **PowerShell 7.2 oder neuer** (`pwsh.exe`), nicht Windows PowerShell 5.1.
+- **Windows PowerShell 5.1** (`powershell.exe`) für `Replace-CouchDbNode-PS51.ps1`, oder **PowerShell 7.2+** (`pwsh.exe`) für `Replace-CouchDbNode.ps1`.
 - Administrator-Zugang auf beiden HTTP-Endpunkten mit denselben Zugangsdaten.
 - Neuer Node ist bereits dem Cluster beigetreten. Alter und neuer Node müssen auf beiden Endpunkten in `all_nodes` und `cluster_nodes` stehen.
 - Direkte Node-Adressen verwenden, keine Loadbalancer-Adresse.
@@ -14,13 +14,13 @@ Der neue Node übernimmt zusätzliche Replikate aller Shards des alten Nodes. Na
 - Während der gesamten Migration keine Datenbanken anlegen/löschen und keine Resharding-Jobs starten. Bereits laufende Jobs vorher beenden oder stoppen.
 - Der Loadbalancer muss den neuen Node während des Wartungsmodus ausschließen. Ein korrekt eingerichteter Healthcheck auf `/_up` erkennt den Wartungsmodus als HTTP 404.
 
-PowerShell unter Windows installieren, falls nötig:
+Für Windows PowerShell 5.1 ist keine zusätzliche Installation nötig. Optional PowerShell 7 installieren:
 
 ```powershell
 winget install --id Microsoft.PowerShell --source winget
 ```
 
-Danach **PowerShell 7** öffnen. Bei administrativ vorgegebener Execution Policy gelten die Vorgaben der eigenen Umgebung. Für eine heruntergeladene und geprüfte Datei kann gegebenenfalls `Unblock-File .\Replace-CouchDbNode.ps1` erforderlich sein.
+Die zum gewählten Skript passende PowerShell öffnen. Bei administrativ vorgegebener Execution Policy gelten die Vorgaben der eigenen Umgebung. Für eine heruntergeladene und geprüfte Datei kann gegebenenfalls `Unblock-File .\Replace-CouchDbNode-PS51.ps1` (beziehungsweise der PS7-Dateiname) erforderlich sein.
 
 ## Schnellstart
 
@@ -30,6 +30,27 @@ Repository herunterladen oder klonen und in den Ordner wechseln:
 git clone https://github.com/CodeExc/CouchDB-Replace-Nodes.git
 Set-Location CouchDB-Replace-Nodes
 ```
+
+Skript passend zur PowerShell-Version auswählen:
+
+| PowerShell | Skript |
+|---|---|
+| Windows PowerShell 5.1, einschließlich 5.1.26100 | `Replace-CouchDbNode-PS51.ps1` |
+| PowerShell 7.2 oder neuer | `Replace-CouchDbNode.ps1` |
+
+Für Windows PowerShell 5.1:
+
+```powershell
+$ScriptPath = '.\Replace-CouchDbNode-PS51.ps1'
+```
+
+Für PowerShell 7 alternativ:
+
+```powershell
+$ScriptPath = '.\Replace-CouchDbNode.ps1'
+```
+
+Die Parameter und Modi sind in beiden Varianten identisch. Die 5.1-Version benötigt keine zusätzlichen Module; sie wandelt JSON-Objekte rekursiv in Dictionaries um, verwendet `-UseBasicParsing` und schreibt Sicherungen über .NET als UTF-8 ohne BOM. TLS 1.2 wird zusätzlich aktiviert, ohne die Zertifikatsprüfung abzuschalten.
 
 Parameter einmal setzen. Node-Namen exakt aus `GET /_membership` übernehmen:
 
@@ -55,7 +76,7 @@ Passwörter werden nicht in die Metadaten-Sicherung geschrieben. HTTP überträg
 ### 1. Vorschau
 
 ```powershell
-.\Replace-CouchDbNode.ps1 @p -Mode Plan
+& $ScriptPath @p -Mode Plan
 ```
 
 Prüft Cluster-Mitgliedschaft, Zielidentität und Shard-Map. Listet betroffene Datenbanken mit der Anzahl der Shards auf. **Ändert nichts.** Ohne `-Mode` wird ebenfalls `Plan` verwendet.
@@ -63,7 +84,7 @@ Prüft Cluster-Mitgliedschaft, Zielidentität und Shard-Map. Listet betroffene D
 ### 2. Zusätzliche Replikate anlegen
 
 ```powershell
-.\Replace-CouchDbNode.ps1 @p -Mode Prepare
+& $ScriptPath @p -Mode Prepare
 ```
 
 Das Skript:
@@ -80,7 +101,7 @@ Die Dateien werden durch interne Replikation übertragen. Manuelles Kopieren ist
 ### 3. Synchronisierung überprüfen
 
 ```powershell
-.\Replace-CouchDbNode.ps1 @p -Mode Status
+& $ScriptPath @p -Mode Status
 ```
 
 Zeigt den Wartungsmodus und `internal_replication_jobs` des neuen Nodes. Wiederholt beobachten und die CouchDB-Logs auf Replikations-, Netzwerk- und Speicherfehler prüfen.
@@ -94,7 +115,7 @@ Das Skript automatisiert diese inhaltliche Prüfung nicht und beendet den Wartun
 **Nur nach erfolgreich geprüfter Synchronisierung:**
 
 ```powershell
-.\Replace-CouchDbNode.ps1 @p -Mode Finalize -SynchronizationVerified
+& $ScriptPath @p -Mode Finalize -SynchronizationVerified
 ```
 
 Das Skript prüft, ob alle betroffenen Zielzuordnungen vorhanden sind und der neue Node aktuell keine internen Replikationsjobs meldet. Danach beendet es den Wartungsmodus, prüft `/_up`, entfernt die Zuordnungen des alten Nodes und kontrolliert abschließend die Shard-Map.
@@ -139,6 +160,8 @@ Alte Metadaten-Sicherungen nicht blind zurückschreiben: Revisionen, zwischenzei
 ## Validierung und Grenzen
 
 Syntax und Ablauf wurden mit PowerShell 7.4.6 gegen einen simulierten HTTP-Endpunkt geprüft: Vorschau, Prepare, wiederholtes Prepare ohne Duplikate, Status, Finalize und wiederholtes Finalize; einschließlich Systemdatenbanken und kodierter Datenbanknamen.
+
+Die 5.1-Variante wurde ebenfalls auf Syntax und gegen denselben simulierten HTTP-Endpunkt geprüft, einschließlich verschachtelter Arrays und wiederholter Ausführung. Diese Prüfungen liefen unter PowerShell 7.4.6 mit der 5.1-kompatiblen Implementierung. **Ein direkter Lauf unter Windows PowerShell 5.1 wurde hier noch nicht ausgeführt.**
 
 **Noch kein Integrationstest gegen einen echten CouchDB-3.5.2-Cluster.** Vor produktiver Nutzung in einer passenden Testumgebung erproben.
 
